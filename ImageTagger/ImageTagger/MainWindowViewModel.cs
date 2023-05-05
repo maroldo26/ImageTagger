@@ -197,12 +197,16 @@ namespace ImageTagger
                 return;
 
             string[] subfolders = Directory.GetDirectories(FolderPath);
+
             foreach (string subfolder in subfolders)
             {
                 FolderModel folderModel = new FolderModel(subfolder);
                 LoadImages(subfolder, folderModel);
                 Folders.Add(folderModel);
-            }           
+            }
+
+            if (!Folders.Any())
+                MessageBox.Show($"No sub-folder(s) present iniside {FolderPath}");
         }
 
         private void LoadImages(string rootPath, FolderModel folderModel)
@@ -242,11 +246,13 @@ namespace ImageTagger
 
             foreach (var folder in Folders)
             {
+                Logs.Add($"Updating Tags for images under directory '{folder.Path}'.");
                 await TraverseFodler(folder);
             }
 
             Logs.Add($"Tags updated in all images. Total images {TotalImages}. Succeded - {succesCount}, Failed - {failCount}");
 
+            WriteLogs();
             IsBusy = false;
         }
 
@@ -254,6 +260,7 @@ namespace ImageTagger
         {
             Logs.Clear();
             CurrentProgress = 0;
+            succesCount = 0;
         }
 
         private async Task TraverseFodler(FolderModel model)
@@ -305,19 +312,23 @@ namespace ImageTagger
                 predefinedIgnoreList.AddRange(words);
             }
         }
-    } 
 
-    //public enum ModelType
-    //{
-    //    Folder,
-    //    Image
-    //}
+        private void WriteLogs()
+        {
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            using (var file = File.Create($"TagUpdate_{timestamp}.log"))
+            {
+                StreamWriter sw = new StreamWriter(file);
+                sw.WriteLine($"Root path is {FolderPath}");
 
-    //public enum ImageType
-    //{
-    //    Jpg,
-    //    Png,
-    //    Gif,
-    //    Tiff
-    //}
+                foreach (var log in Logs)
+                {
+                    sw.WriteLine(log);
+                }
+
+                sw.Close();
+            }
+                
+        }
+    }
 }

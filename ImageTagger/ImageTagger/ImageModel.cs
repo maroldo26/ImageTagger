@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Media.Imaging;
+using CompactExifLib;
 
 namespace ImageTagger
 {
@@ -69,89 +70,62 @@ namespace ImageTagger
                         return false;
                 }
 
-                MemoryStream updatedImageStream = new MemoryStream();
                 var creationTime = File.GetCreationTime(Path);
-                MemoryStream originalStream = new MemoryStream();
+                var modifiedTime = File.GetLastWriteTime(Path);
 
-                using (Stream originalFile = System.IO.File.Open(Path, FileMode.Open, FileAccess.ReadWrite))
+                ExifData ed = new ExifData(Path);
+                ExifTag tagtoUpdate = ExifTag.XpKeywords;
+
+                if (!ed.GetTagValue(tagtoUpdate, out string xptags, StrCoding.Utf16Le_Byte))
                 {
-                    originalFile.CopyTo(originalStream);
-                    originalStream.Position = 0;
-                    BitmapDecoder original = BitmapDecoder.Create(originalStream,
-                        BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.Default);
+                    xptags = string.Empty;
+                }
 
-                    if (original.Frames[0] != null && original.Frames[0].Metadata != null)
+                var relativePath = System.IO.Path.GetRelativePath(rootPath, Path);
+                relativePath = System.IO.Path.GetDirectoryName(relativePath);
+
+                if (string.IsNullOrEmpty(relativePath))
+                {
+                    ErrorMessage = "No tags to add as image is present in the root folder.";
+                    return true;
+                }
+
+                var tags = new List<string>(relativePath.Split("\\"));
+                var newTags = new List<string>();
+                var existingTags = xptags.Split(';', StringSplitOptions.RemoveEmptyEntries);
+
+                if (existingTags != null && existingTags.Any())
+                    newTags.AddRange(existingTags);
+
+                foreach (var tag in tags)
+                {
+                    var editedTag = tag;
+
+                    if (editedTag.Length > 4)
                     {
-                        //clone the metadata from the original input image so that it can be modified
-                        BitmapMetadata? metadata = original.Frames[0].Metadata.Clone() as BitmapMetadata;
+                        var firstFour = tag.Substring(0, 4);
 
-                        if (metadata == null)
+                        if (int.TryParse(firstFour, out _))
                         {
-                            ErrorMessage = "Unable to read metadata of the Image";
-                            return false;
+                            newTags.Add(firstFour);
+                            editedTag = tag.Substring(4).Trim();
                         }
+                    }
 
-                        var relativePath = System.IO.Path.GetRelativePath(rootPath, Path);
-                        relativePath = System.IO.Path.GetDirectoryName(relativePath);
+                    var splittedTags = editedTag.Split(new char[] { ' ', '-', '_' });
 
-                        if (string.IsNullOrEmpty(relativePath))
-                        {
-                            ErrorMessage = "No tags to add as image is present in the root folder.";
-                            return true;
-                        }
-
-                        var tags = new List<string>(relativePath.Split("\\"));
-                        var newTags = new List<string>();
-                        var existingKeywords = metadata.Keywords;
-
-                        if (existingKeywords != null && existingKeywords.Any())
-                            newTags.AddRange(existingKeywords);
-
-                        foreach (var tag in tags)
-                        {
-                            if (!ignoreWords.Contains(tag, StringComparer.InvariantCultureIgnoreCase))
-                                newTags.Add(tag);
-                        }
-
-                        metadata.Keywords = new ReadOnlyCollection<string>(newTags);
-
-                        encoder.Frames.Add(
-                           BitmapFrame.Create(original.Frames[0], original.Frames[0].Thumbnail, metadata, original.Frames[0].ColorContexts));
-
-                        encoder.Save(updatedImageStream);
+                    foreach (var splittedTag in splittedTags)
+                    {
+                        if (!ignoreWords.Contains(splittedTag, StringComparer.InvariantCultureIgnoreCase) && !newTags.Contains(splittedTag))
+                            newTags.Add(splittedTag);
                     }
                 }
 
-                // Save the update image by overwriting existing image.
-                try
-                {
-                    using (var updatedFile = File.Create(Path))
-                    {
-                        updatedImageStream.Position = 0;
-                        updatedImageStream.CopyTo(updatedFile);
-                        updatedFile.Flush();
-                        updatedFile.Close();
-                    }
-                }
-                catch (Exception)
-                {
-                    ErrorMessage = "Error occured while saving the updated file. Reverting to the original file.";
-                    using (var revertImage = File.Create(Path))
-                    {
-                        originalStream.Position = 0;
-                        originalStream.CopyTo(revertImage);
-                        revertImage.Flush();
-                        revertImage.Close();
-                    }
-                    return false;
-                }
-                finally
-                {
-                    originalStream.Close();
-                    originalStream.Dispose();
-                }
+                ed.SetTagValue(tagtoUpdate, string.Join(';', newTags), StrCoding.Utf16Le_Byte);
+                ed.Save(Path);
 
                 File.SetCreationTime(Path, creationTime);
+                File.SetLastWriteTime(Path, modifiedTime);
             }
             catch (Exception ex)
             {
